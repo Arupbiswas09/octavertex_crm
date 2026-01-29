@@ -322,7 +322,7 @@ export interface AvatarProps {
     src?: string | null;
     alt?: string;
     fallback: string;
-    size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl';
+    size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl' | '2xl';
     className?: string;
     status?: 'online' | 'offline' | 'busy' | 'away';
 }
@@ -334,6 +334,7 @@ export function Avatar({ src, alt, fallback, size = 'md', className, status }: A
         md: 'h-10 w-10 text-base',
         lg: 'h-12 w-12 text-lg',
         xl: 'h-16 w-16 text-xl',
+        '2xl': 'h-32 w-32 text-4xl',
     };
 
     const statusColors = {
@@ -349,6 +350,7 @@ export function Avatar({ src, alt, fallback, size = 'md', className, status }: A
         md: 'h-2.5 w-2.5',
         lg: 'h-3 w-3',
         xl: 'h-3.5 w-3.5',
+        '2xl': 'h-5 w-5',
     };
 
     return (
@@ -418,7 +420,8 @@ export function AvatarGroup({ avatars, max = 4, size = 'md', className }: Avatar
                         size === 'sm' && 'h-8 w-8 text-xs',
                         size === 'md' && 'h-10 w-10 text-sm',
                         size === 'lg' && 'h-12 w-12 text-sm',
-                        size === 'xl' && 'h-16 w-16 text-base'
+                        size === 'xl' && 'h-16 w-16 text-base',
+                        size === '2xl' && 'h-32 w-32 text-4xl'
                     )}
                 >
                     +{remaining}

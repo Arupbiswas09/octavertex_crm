@@ -183,53 +183,87 @@ export const useAttendanceStore = create<AttendanceState>()(
 // ============================================
 
 interface TimerState {
-    activeTaskId: string | null;
-    startTime: Date | null;
+    isRunning: boolean;
+    startTime: number | null;
+    taskId: string | null;
+    taskName: string;
+    projectId: string;
+    projectName: string;
     elapsedSeconds: number;
-    isPaused: boolean;
 
     // Actions
-    startTimer: (taskId: string) => void;
+    startTimer: (taskId: string, taskName: string, projectId: string, projectName: string) => void;
     stopTimer: () => void;
-    pauseTimer: () => void;
-    resumeTimer: () => void;
-    updateElapsed: (seconds: number) => void;
+    toggleTimer: () => void;
     reset: () => void;
 }
 
-export const useTimerStore = create<TimerState>((set) => ({
-    activeTaskId: null,
-    startTime: null,
-    elapsedSeconds: 0,
-    isPaused: false,
-
-    startTimer: (taskId) =>
-        set({
-            activeTaskId: taskId,
-            startTime: new Date(),
-            elapsedSeconds: 0,
-            isPaused: false,
-        }),
-
-    stopTimer: () =>
-        set({
-            activeTaskId: null,
+export const useTimerStore = create<TimerState>()(
+    persist(
+        (set) => ({
+            isRunning: false,
             startTime: null,
+            taskId: null,
+            taskName: '',
+            projectId: '',
+            projectName: '',
             elapsedSeconds: 0,
-            isPaused: false,
-        }),
 
-    pauseTimer: () => set({ isPaused: true }),
-    resumeTimer: () => set({ isPaused: false }),
-    updateElapsed: (seconds) => set({ elapsedSeconds: seconds }),
-    reset: () =>
-        set({
-            activeTaskId: null,
-            startTime: null,
-            elapsedSeconds: 0,
-            isPaused: false,
+            startTimer: (taskId, taskName, projectId, projectName) =>
+                set({
+                    isRunning: true,
+                    startTime: Date.now(),
+                    taskId,
+                    taskName,
+                    projectId,
+                    projectName,
+                }),
+
+            stopTimer: () =>
+                set({
+                    isRunning: false,
+                    startTime: null,
+                    taskId: null,
+                    taskName: '',
+                    projectId: '',
+                    projectName: '',
+                    elapsedSeconds: 0,
+                }),
+
+            toggleTimer: () =>
+                set((state) => {
+                    if (state.isRunning) {
+                        // Pause
+                        return {
+                            isRunning: false,
+                            elapsedSeconds: state.elapsedSeconds + (state.startTime ? Math.floor((Date.now() - state.startTime) / 1000) : 0),
+                            startTime: null,
+                        };
+                    } else {
+                        // Resume
+                        return {
+                            isRunning: true,
+                            startTime: Date.now(),
+                        };
+                    }
+                }),
+
+            reset: () =>
+                set({
+                    isRunning: false,
+                    startTime: null,
+                    taskId: null,
+                    taskName: '',
+                    projectId: '',
+                    projectName: '',
+                    elapsedSeconds: 0,
+                }),
         }),
-}));
+        {
+            name: 'octavertex-timer',
+        }
+    )
+);
 
 // ============================================
 // Chat Store
