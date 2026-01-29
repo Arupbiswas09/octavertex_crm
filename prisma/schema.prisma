@@ -1,0 +1,778 @@
+// Octavertex Media Platform - Complete Database Schema
+// Production-ready schema with all MVP features
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+
+// ============================================
+// CORE ENTITIES - Users & Organizations
+// ============================================
+
+enum Role {
+  SUPER_ADMIN
+  HR_ADMIN
+  PROJECT_ADMIN
+  TEAM_LEAD
+  EMPLOYEE
+  CONTRACTOR
+  GUEST
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  PENDING
+}
+
+model Organization {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  logo        String?
+  description String?
+  website     String?
+  address     String?
+  timezone    String   @default("UTC")
+  settings    Json     @default("{}")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users       User[]
+  teams       Team[]
+  projects    Project[]
+  departments Department[]
+  leaveTypes  LeaveType[]
+  shifts      Shift[]
+  holidays    Holiday[]
+
+  @@index([slug])
+}
+
+model Department {
+  id             String       @id @default(cuid())
+  name           String
+  description    String?
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  managerId      String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  users User[]
+  teams Team[]
+
+  @@unique([organizationId, name])
+}
+
+model User {
+  id                String     @id @default(cuid())
+  email             String     @unique
+  emailVerified     DateTime?
+  passwordHash      String?
+  firstName         String
+  lastName          String
+  avatar            String?
+  phone             String?
+  role              Role       @default(EMPLOYEE)
+  status            UserStatus @default(PENDING)
+  title             String?
+  bio               String?
+  skills            String[]   @default([])
+  hourlyRate        Decimal?   @db.Decimal(10, 2)
+  
+  organizationId    String?
+  organization      Organization? @relation(fields: [organizationId], references: [id])
+  departmentId      String?
+  department        Department?   @relation(fields: [departmentId], references: [id])
+  managerId         String?
+  manager           User?         @relation("ManagerReports", fields: [managerId], references: [id])
+  directReports     User[]        @relation("ManagerReports")
+  
+  shiftId           String?
+  shift             Shift?        @relation(fields: [shiftId], references: [id])
+  
+  timezone          String        @default("UTC")
+  startDate         DateTime?
+  lastLogin         DateTime?
+  settings          Json          @default("{}")
+  
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  // Relations
+  teamMemberships   TeamMember[]
+  assignedTasks     TaskAssignee[]
+  watchedTasks      TaskWatcher[]
+  createdTasks      Task[]         @relation("TaskCreator")
+  comments          Comment[]
+  timeEntries       TimeEntry[]
+  attendance        Attendance[]
+  leaveRequests     LeaveRequest[] @relation("LeaveRequester")
+  approvedLeaves    LeaveRequest[] @relation("LeaveApprover")
+  leaveBalances     LeaveBalance[]
+  notifications     Notification[]
+  sentMessages      ChatMessage[]  @relation("MessageSender")
+  channelMembers    ChannelMember[]
+  createdProjects   Project[]      @relation("ProjectCreator")
+  auditLogs         AuditLog[]
+  accounts          Account[]
+  sessions          Session[]
+  approvals         Approval[]     @relation("Approver")
+  requestedApprovals Approval[]    @relation("Requester")
+
+  @@index([email])
+  @@index([organizationId])
+  @@index([role])
+}
+
+// ============================================
+// AUTH ENTITIES (NextAuth compatible)
+// ============================================
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ============================================
+// TEAMS
+// ============================================
+
+model Team {
+  id             String       @id @default(cuid())
+  name           String
+  description    String?
+  color          String?
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  departmentId   String?
+  department     Department?  @relation(fields: [departmentId], references: [id])
+  leadId         String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  members  TeamMember[]
+  projects Project[]
+  channels Channel[]
+
+  @@unique([organizationId, name])
+}
+
+model TeamMember {
+  id        String   @id @default(cuid())
+  teamId    String
+  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      String   @default("member") // lead, member
+  joinedAt  DateTime @default(now())
+
+  @@unique([teamId, userId])
+}
+
+// ============================================
+// PROJECTS & TASKS
+// ============================================
+
+enum ProjectStatus {
+  PLANNING
+  ACTIVE
+  ON_HOLD
+  COMPLETED
+  ARCHIVED
+}
+
+enum TaskStatus {
+  BACKLOG
+  TODO
+  IN_PROGRESS
+  IN_REVIEW
+  DONE
+  CANCELLED
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+  CRITICAL
+}
+
+model Project {
+  id             String        @id @default(cuid())
+  name           String
+  slug           String
+  description    String?
+  color          String?
+  icon           String?
+  status         ProjectStatus @default(PLANNING)
+  visibility     String        @default("team") // public, team, private
+  
+  startDate      DateTime?
+  endDate        DateTime?
+  estimatedHours Int?
+  budget         Decimal?      @db.Decimal(12, 2)
+  
+  organizationId String
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  teamId         String?
+  team           Team?         @relation(fields: [teamId], references: [id])
+  createdById    String
+  createdBy      User          @relation("ProjectCreator", fields: [createdById], references: [id])
+  
+  settings       Json          @default("{}")
+  customFields   Json          @default("[]")
+  
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  tasks      Task[]
+  milestones Milestone[]
+  labels     Label[]
+  channels   Channel[]
+  timeEntries TimeEntry[]
+
+  @@unique([organizationId, slug])
+  @@index([status])
+}
+
+model Milestone {
+  id          String    @id @default(cuid())
+  name        String
+  description String?
+  dueDate     DateTime?
+  completed   Boolean   @default(false)
+  completedAt DateTime?
+  projectId   String
+  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  tasks Task[]
+}
+
+model Label {
+  id        String  @id @default(cuid())
+  name      String
+  color     String
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  tasks TaskLabel[]
+
+  @@unique([projectId, name])
+}
+
+model Task {
+  id            String     @id @default(cuid())
+  title         String
+  description   String?    @db.Text
+  status        TaskStatus @default(BACKLOG)
+  priority      Priority   @default(MEDIUM)
+  
+  // Estimates
+  estimatedHours Decimal?  @db.Decimal(6, 2)
+  storyPoints    Int?
+  
+  // Dates
+  startDate     DateTime?
+  dueDate       DateTime?
+  completedAt   DateTime?
+  
+  // Hierarchy
+  projectId     String
+  project       Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  parentId      String?
+  parent        Task?      @relation("Subtasks", fields: [parentId], references: [id])
+  subtasks      Task[]     @relation("Subtasks")
+  milestoneId   String?
+  milestone     Milestone? @relation(fields: [milestoneId], references: [id])
+  
+  // Creator
+  createdById   String
+  createdBy     User       @relation("TaskCreator", fields: [createdById], references: [id])
+  
+  // Position for Kanban
+  position      Int        @default(0)
+  
+  // Custom fields JSON
+  customFields  Json       @default("{}")
+  
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  assignees    TaskAssignee[]
+  watchers     TaskWatcher[]
+  labels       TaskLabel[]
+  comments     Comment[]
+  attachments  Attachment[]
+  timeEntries  TimeEntry[]
+  dependencies TaskDependency[] @relation("DependentTask")
+  dependents   TaskDependency[] @relation("BlockingTask")
+  activities   TaskActivity[]
+
+  @@index([projectId, status])
+  @@index([status])
+  @@index([dueDate])
+}
+
+model TaskAssignee {
+  id        String   @id @default(cuid())
+  taskId    String
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assignedAt DateTime @default(now())
+
+  @@unique([taskId, userId])
+}
+
+model TaskWatcher {
+  id        String   @id @default(cuid())
+  taskId    String
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, userId])
+}
+
+model TaskLabel {
+  id      String @id @default(cuid())
+  taskId  String
+  task    Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  labelId String
+  label   Label  @relation(fields: [labelId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, labelId])
+}
+
+model TaskDependency {
+  id              String @id @default(cuid())
+  dependentTaskId String
+  dependentTask   Task   @relation("DependentTask", fields: [dependentTaskId], references: [id], onDelete: Cascade)
+  blockingTaskId  String
+  blockingTask    Task   @relation("BlockingTask", fields: [blockingTaskId], references: [id], onDelete: Cascade)
+  type            String @default("blocks") // blocks, blocked_by
+
+  @@unique([dependentTaskId, blockingTaskId])
+}
+
+model TaskActivity {
+  id        String   @id @default(cuid())
+  taskId    String
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  userId    String
+  action    String   // created, updated, status_changed, assigned, etc.
+  field     String?
+  oldValue  String?
+  newValue  String?
+  createdAt DateTime @default(now())
+
+  @@index([taskId])
+}
+
+// ============================================
+// COMMENTS & ATTACHMENTS
+// ============================================
+
+model Comment {
+  id        String   @id @default(cuid())
+  content   String   @db.Text
+  taskId    String
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    User     @relation(fields: [authorId], references: [id])
+  parentId  String?
+  parent    Comment? @relation("CommentReplies", fields: [parentId], references: [id])
+  replies   Comment[] @relation("CommentReplies")
+  edited    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  attachments Attachment[]
+
+  @@index([taskId])
+}
+
+model Attachment {
+  id         String   @id @default(cuid())
+  name       String
+  url        String
+  size       Int
+  mimeType   String
+  taskId     String?
+  task       Task?    @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  commentId  String?
+  comment    Comment? @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  uploadedById String
+  createdAt  DateTime @default(now())
+}
+
+// ============================================
+// TIME TRACKING & ATTENDANCE
+// ============================================
+
+model Shift {
+  id             String       @id @default(cuid())
+  name           String
+  startTime      String       // "09:00"
+  endTime        String       // "18:00"
+  breakDuration  Int          @default(60) // minutes
+  workDays       Int[]        @default([1, 2, 3, 4, 5]) // 0=Sunday
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  users User[]
+
+  @@unique([organizationId, name])
+}
+
+model TimeEntry {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  taskId      String?
+  task        Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  projectId   String?
+  project     Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  
+  description String?
+  startTime   DateTime
+  endTime     DateTime?
+  duration    Int?      // seconds
+  billable    Boolean   @default(true)
+  
+  // For manual entries
+  date        DateTime  @db.Date
+  
+  approved    Boolean   @default(false)
+  approvedAt  DateTime?
+  approvedById String?
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([userId, date])
+  @@index([taskId])
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  HALF_DAY
+  LATE
+  ON_LEAVE
+  HOLIDAY
+  WEEKEND
+}
+
+model Attendance {
+  id         String           @id @default(cuid())
+  userId     String
+  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date       DateTime         @db.Date
+  status     AttendanceStatus @default(PRESENT)
+  
+  clockIn    DateTime?
+  clockOut   DateTime?
+  
+  // Break tracking
+  breakStart DateTime?
+  breakEnd   DateTime?
+  totalBreak Int?             // minutes
+  
+  // Location/IP tracking (optional)
+  clockInIp  String?
+  clockOutIp String?
+  clockInLocation Json?
+  clockOutLocation Json?
+  
+  // Work hours
+  workHours    Decimal?       @db.Decimal(4, 2)
+  overtimeHours Decimal?      @db.Decimal(4, 2)
+  
+  notes      String?
+  approved   Boolean          @default(false)
+  locked     Boolean          @default(false)
+  
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+
+  @@unique([userId, date])
+  @@index([date])
+}
+
+// ============================================
+// LEAVE MANAGEMENT
+// ============================================
+
+enum LeaveStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+model LeaveType {
+  id               String       @id @default(cuid())
+  name             String
+  description      String?
+  color            String?
+  defaultDays      Int          @default(0)
+  carryForward     Boolean      @default(false)
+  maxCarryForward  Int?
+  requiresApproval Boolean      @default(true)
+  paid             Boolean      @default(true)
+  organizationId   String
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  leaveRequests LeaveRequest[]
+  leaveBalances LeaveBalance[]
+
+  @@unique([organizationId, name])
+}
+
+model LeaveBalance {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  leaveTypeId String
+  leaveType   LeaveType @relation(fields: [leaveTypeId], references: [id], onDelete: Cascade)
+  year        Int
+  entitled    Decimal   @db.Decimal(4, 1)
+  used        Decimal   @default(0) @db.Decimal(4, 1)
+  pending     Decimal   @default(0) @db.Decimal(4, 1)
+  carriedOver Decimal   @default(0) @db.Decimal(4, 1)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([userId, leaveTypeId, year])
+}
+
+model LeaveRequest {
+  id          String      @id @default(cuid())
+  userId      String
+  user        User        @relation("LeaveRequester", fields: [userId], references: [id], onDelete: Cascade)
+  leaveTypeId String
+  leaveType   LeaveType   @relation(fields: [leaveTypeId], references: [id])
+  
+  startDate   DateTime    @db.Date
+  endDate     DateTime    @db.Date
+  days        Decimal     @db.Decimal(4, 1)
+  halfDay     Boolean     @default(false)
+  halfDayType String?     // first_half, second_half
+  
+  reason      String?
+  status      LeaveStatus @default(PENDING)
+  
+  approverId  String?
+  approver    User?       @relation("LeaveApprover", fields: [approverId], references: [id])
+  approvedAt  DateTime?
+  rejectionReason String?
+  
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@index([userId])
+  @@index([status])
+}
+
+model Holiday {
+  id             String       @id @default(cuid())
+  name           String
+  date           DateTime     @db.Date
+  type           String       @default("public") // public, optional
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+
+  @@unique([organizationId, date])
+}
+
+// ============================================
+// APPROVALS WORKFLOW
+// ============================================
+
+model Approval {
+  id           String   @id @default(cuid())
+  type         String   // timesheet, leave, expense
+  referenceId  String
+  requesterId  String
+  requester    User     @relation("Requester", fields: [requesterId], references: [id])
+  approverId   String?
+  approver     User?    @relation("Approver", fields: [approverId], references: [id])
+  status       String   @default("pending") // pending, approved, rejected
+  comments     String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([type, referenceId])
+}
+
+// ============================================
+// CHAT & COMMUNICATION
+// ============================================
+
+enum ChannelType {
+  PUBLIC
+  PRIVATE
+  DIRECT
+  PROJECT
+  TEAM
+}
+
+model Channel {
+  id          String      @id @default(cuid())
+  name        String?
+  description String?
+  type        ChannelType @default(PUBLIC)
+  projectId   String?
+  project     Project?    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  teamId      String?
+  team        Team?       @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  members  ChannelMember[]
+  messages ChatMessage[]
+
+  @@index([type])
+}
+
+model ChannelMember {
+  id          String   @id @default(cuid())
+  channelId   String
+  channel     Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role        String   @default("member") // admin, member
+  lastRead    DateTime @default(now())
+  muted       Boolean  @default(false)
+  joinedAt    DateTime @default(now())
+
+  @@unique([channelId, userId])
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  content   String   @db.Text
+  channelId String
+  channel   Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  senderId  String
+  sender    User     @relation("MessageSender", fields: [senderId], references: [id])
+  
+  parentId  String?
+  parent    ChatMessage?  @relation("ThreadReplies", fields: [parentId], references: [id])
+  replies   ChatMessage[] @relation("ThreadReplies")
+  
+  edited    Boolean  @default(false)
+  deleted   Boolean  @default(false)
+  
+  attachments Json   @default("[]")
+  reactions   Json   @default("{}")
+  mentions    String[] @default([])
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([channelId])
+}
+
+// ============================================
+// NOTIFICATIONS
+// ============================================
+
+enum NotificationType {
+  TASK_ASSIGNED
+  TASK_UPDATED
+  TASK_COMMENTED
+  TASK_DUE
+  MENTION
+  LEAVE_REQUEST
+  LEAVE_APPROVED
+  LEAVE_REJECTED
+  TIMESHEET_REMINDER
+  APPROVAL_NEEDED
+  CHAT_MESSAGE
+  SYSTEM
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      NotificationType
+  title     String
+  message   String
+  data      Json             @default("{}")
+  read      Boolean          @default(false)
+  readAt    DateTime?
+  actionUrl String?
+  createdAt DateTime         @default(now())
+
+  @@index([userId, read])
+}
+
+// ============================================
+// AUDIT LOGS
+// ============================================
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  action     String
+  entity     String
+  entityId   String
+  changes    Json?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  @@index([entity, entityId])
+  @@index([userId])
+  @@index([createdAt])
+}
